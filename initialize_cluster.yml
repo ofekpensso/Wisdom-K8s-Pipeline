@@ -1,0 +1,46 @@
+---
+- name: Initialize Kubernetes Master
+  hosts: masters
+  become: yes
+  tasks:
+    - name: Initialize the cluster (this might take a minute)
+      shell: kubeadm init --pod-network-cidr=192.168.0.0/16
+      args:
+        creates: /etc/kubernetes/admin.conf 
+
+    - name: Create .kube directory for the user
+      file:
+        path: /home/ubuntu/.kube
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: 0755
+
+    - name: Copy admin.conf to user's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/ubuntu/.kube/config
+        remote_src: yes
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Install Calico Pod Network
+      become: no 
+      shell: kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.26.0/manifests/calico.yaml
+
+    - name: Generate join command
+      command: kubeadm token create --print-join-command
+      register: join_command
+
+    - name: Set join command as a fact for workers to see
+      set_fact:
+        join_command_raw: "{{ join_command.stdout }}"
+
+- name: Join Workers to the Cluster
+  hosts: workers
+  become: yes
+  tasks:
+    - name: Join the cluster
+      shell: "{{ hostvars['master-node']['join_command_raw'] }}"
+      args:
+        creates: /etc/kubernetes/kubelet.conf 
